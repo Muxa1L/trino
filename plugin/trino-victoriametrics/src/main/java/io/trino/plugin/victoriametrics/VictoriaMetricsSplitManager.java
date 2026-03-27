@@ -13,6 +13,7 @@
  */
 package io.trino.plugin.victoriametrics;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Inject;
 import io.airlift.http.client.HttpUriBuilder;
@@ -86,6 +87,10 @@ public class VictoriaMetricsSplitManager
             throw new TableNotFoundException(tableHandle.toSchemaTableName());
         }
 
+        if (tableHandle.predicate().isPresent() && tableHandle.predicate().get().isNone()) {
+            return new FixedSplitSource(ImmutableList.of());
+        }
+
         Duration maxQueryRangeDuration = getMaxQueryRange(session);
         Duration queryChunkSizeDuration = getQueryChunkSize(session);
 
@@ -97,6 +102,7 @@ public class VictoriaMetricsSplitManager
                                 victoriaMetricsURI,
                                 time,
                                 table.name(),
+                                tableHandle.labelMatchers(),
                                 queryChunkSizeDuration).toString());
                     }
                     catch (URISyntaxException e) {
@@ -107,14 +113,37 @@ public class VictoriaMetricsSplitManager
     }
 
     // HttpUriBuilder handles URI encode
-    private static URI buildQuery(URI baseURI, String time, String metricName, Duration queryChunkSizeDuration)
+    private static URI buildQuery(URI baseURI, String time, String metricName, Map<String, String> labelMatchers, Duration queryChunkSizeDuration)
             throws URISyntaxException
     {
         return HttpUriBuilder.uriBuilderFrom(baseURI)
                 .appendPath("api/v1/query")
-                .addParameter("query", metricName + "[" + queryChunkSizeDuration.roundTo(queryChunkSizeDuration.getUnit()) + Duration.timeUnitToString(queryChunkSizeDuration.getUnit()) + "]")
+                .addParameter("query", renderQuery(metricName, labelMatchers, queryChunkSizeDuration))
                 .addParameter("time", time)
                 .build();
+    }
+
+    static String renderQuery(String metricName, Map<String, String> labelMatchers, Duration queryChunkSizeDuration)
+    {
+        String selector = labelMatchers.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + "=\"" + escapeLabelValue(entry.getValue()) + "\"")
+                .collect(Collectors.joining(",", "{", "}"));
+
+        String rangeSelector = "[" + queryChunkSizeDuration.roundTo(queryChunkSizeDuration.getUnit()) + Duration.timeUnitToString(queryChunkSizeDuration.getUnit()) + "]";
+        if (labelMatchers.isEmpty()) {
+            return metricName + rangeSelector;
+        }
+        return metricName + selector + rangeSelector;
+    }
+
+    private static String escapeLabelValue(String value)
+    {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t")
+                .replace("\"", "\\\"");
     }
 
     /**

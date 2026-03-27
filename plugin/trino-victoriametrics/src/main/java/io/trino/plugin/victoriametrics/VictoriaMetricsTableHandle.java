@@ -13,17 +13,19 @@
  */
 package io.trino.plugin.victoriametrics;
 
+import com.google.common.collect.ImmutableMap;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.TupleDomain;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
-public record VictoriaMetricsTableHandle(String schemaName, String tableName, Optional<TupleDomain<ColumnHandle>> predicate)
+public record VictoriaMetricsTableHandle(String schemaName, String tableName, Optional<TupleDomain<ColumnHandle>> predicate, Map<String, String> labelMatchers)
         implements ConnectorTableHandle
 {
     public VictoriaMetricsTableHandle
@@ -31,6 +33,7 @@ public record VictoriaMetricsTableHandle(String schemaName, String tableName, Op
         requireNonNull(schemaName, "schemaName is null");
         requireNonNull(tableName, "tableName is null");
         requireNonNull(predicate, "predicate is null");
+    labelMatchers = ImmutableMap.copyOf(requireNonNull(labelMatchers, "labelMatchers is null"));
     }
 
     public SchemaTableName toSchemaTableName()
@@ -40,13 +43,18 @@ public record VictoriaMetricsTableHandle(String schemaName, String tableName, Op
 
     public VictoriaMetricsTableHandle withPredicate(TupleDomain<ColumnHandle> predicate)
     {
-        return new VictoriaMetricsTableHandle(schemaName, tableName, Optional.of(predicate));
+        return new VictoriaMetricsTableHandle(schemaName, tableName, Optional.of(predicate), labelMatchers);
+    }
+
+    public VictoriaMetricsTableHandle withLabelMatchers(Map<String, String> labelMatchers)
+    {
+        return new VictoriaMetricsTableHandle(schemaName, tableName, predicate, labelMatchers);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(schemaName, tableName);
+        return Objects.hash(schemaName, tableName, predicate, labelMatchers);
     }
 
     @Override
@@ -61,7 +69,9 @@ public record VictoriaMetricsTableHandle(String schemaName, String tableName, Op
 
         VictoriaMetricsTableHandle other = (VictoriaMetricsTableHandle) obj;
         return Objects.equals(this.schemaName, other.schemaName) &&
-                Objects.equals(this.tableName, other.tableName);
+        Objects.equals(this.tableName, other.tableName) &&
+        Objects.equals(this.predicate, other.predicate) &&
+        Objects.equals(this.labelMatchers, other.labelMatchers);
     }
 
     @Override

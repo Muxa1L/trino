@@ -16,10 +16,15 @@ package io.trino.plugin.victoriametrics;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import io.airlift.slice.Slice;
 import com.google.inject.Inject;
+import io.trino.plugin.base.expression.ConnectorExpressions;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
+import io.trino.spi.expression.Call;
+import io.trino.spi.expression.Constant;
+import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.connector.ConnectorMetadata;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableHandle;
@@ -31,9 +36,11 @@ import io.trino.spi.connector.RelationColumnsMetadata;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
+import io.trino.spi.predicate.TupleDomain;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,6 +48,10 @@ import java.util.Set;
 import java.util.function.UnaryOperator;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static io.trino.spi.expression.Constant.TRUE;
+import static io.trino.spi.expression.StandardFunctions.CAST_FUNCTION_NAME;
+import static io.trino.spi.expression.StandardFunctions.EQUAL_OPERATOR_FUNCTION_NAME;
+import static io.trino.spi.expression.StandardFunctions.IDENTICAL_OPERATOR_FUNCTION_NAME;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.connector.RelationColumnsMetadata.forTable;
 import static java.util.Objects.requireNonNull;
@@ -82,7 +93,7 @@ public class VictoriaMetricsMetadata
             return null;
         }
 
-        return new VictoriaMetricsTableHandle(tableName.getSchemaName(), tableName.getTableName(), Optional.empty());
+        return new VictoriaMetricsTableHandle(tableName.getSchemaName(), tableName.getTableName(), Optional.empty(), ImmutableMap.of());
     }
 
     @Override
@@ -173,8 +184,126 @@ public class VictoriaMetricsMetadata
     @Override
     public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session, ConnectorTableHandle handle, Constraint constraint)
     {
-        VictoriaMetricsTableHandle tableHandle = ((VictoriaMetricsTableHandle) handle)
-                .withPredicate(constraint.getSummary());
-        return Optional.of(new ConstraintApplicationResult<>(tableHandle, constraint.getSummary(), constraint.getExpression(), false));
+        VictoriaMetricsTableHandle tableHandle = (VictoriaMetricsTableHandle) handle;
+
+        TupleDomain<ColumnHandle> oldDomain = tableHandle.predicate().orElseGet(TupleDomain::all);
+        TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(constraint.getSummary());
+        LabelPushdownResult labelPushdown = extractLabelPushdown(constraint.getExpression(), constraint.getAssignments(), tableHandle.labelMatchers());
+
+        if (labelPushdown.unsatisfiable()) {
+            newDomain = TupleDomain.none();
+        }
+
+        if (oldDomain.equals(newDomain) && tableHandle.labelMatchers().equals(labelPushdown.labelMatchers()) && constraint.getExpression().equals(labelPushdown.remainingExpression())) {
+            return Optional.empty();
+        }
+
+        VictoriaMetricsTableHandle newHandle = tableHandle
+                .withPredicate(newDomain)
+                .withLabelMatchers(labelPushdown.labelMatchers());
+
+        return Optional.of(new ConstraintApplicationResult<>(
+                newHandle,
+                constraint.getSummary(),
+                labelPushdown.unsatisfiable() ? TRUE : labelPushdown.remainingExpression(),
+                false));
+    }
+
+    static LabelPushdownResult extractLabelPushdown(ConnectorExpression expression, Map<String, ColumnHandle> assignments, Map<String, String> existingMatchers)
+    {
+        Map<String, String> labelMatchers = new LinkedHashMap<>(existingMatchers);
+        ImmutableList.Builder<ConnectorExpression> remainingExpressions = ImmutableList.builder();
+
+        for (ConnectorExpression conjunct : ConnectorExpressions.extractConjuncts(expression)) {
+            Optional<LabelMatcher> labelMatcher = tryExtractLabelMatcher(conjunct, assignments);
+            if (labelMatcher.isEmpty()) {
+                remainingExpressions.add(conjunct);
+                continue;
+            }
+
+            String existingValue = labelMatchers.putIfAbsent(labelMatcher.get().label(), labelMatcher.get().value());
+            if (existingValue != null && !existingValue.equals(labelMatcher.get().value())) {
+                return new LabelPushdownResult(ImmutableMap.copyOf(labelMatchers), TRUE, true);
+            }
+        }
+
+        return new LabelPushdownResult(ImmutableMap.copyOf(labelMatchers), ConnectorExpressions.and(remainingExpressions.build()), false);
+    }
+
+    private static Optional<LabelMatcher> tryExtractLabelMatcher(ConnectorExpression expression, Map<String, ColumnHandle> assignments)
+    {
+        if (!(expression instanceof Call call) || call.getArguments().size() != 2) {
+            return Optional.empty();
+        }
+
+        if (!call.getFunctionName().equals(EQUAL_OPERATOR_FUNCTION_NAME) && !call.getFunctionName().equals(IDENTICAL_OPERATOR_FUNCTION_NAME)) {
+            return Optional.empty();
+        }
+
+        return tryExtractLabelMatcher(call.getArguments().get(0), call.getArguments().get(1), assignments)
+                .or(() -> tryExtractLabelMatcher(call.getArguments().get(1), call.getArguments().get(0), assignments));
+    }
+
+    private static Optional<LabelMatcher> tryExtractLabelMatcher(ConnectorExpression left, ConnectorExpression right, Map<String, ColumnHandle> assignments)
+    {
+        Optional<String> labelName = tryExtractLabelName(left, assignments);
+        if (labelName.isEmpty()) {
+            return Optional.empty();
+        }
+
+        ConnectorExpression unwrappedRight = unwrapCast(right);
+        if (!(unwrappedRight instanceof Constant constant) || constant.getValue() == null || !(constant.getValue() instanceof Slice slice)) {
+            return Optional.empty();
+        }
+
+        return Optional.of(new LabelMatcher(labelName.get(), slice.toStringUtf8()));
+    }
+
+    private static Optional<String> tryExtractLabelName(ConnectorExpression expression, Map<String, ColumnHandle> assignments)
+    {
+        ConnectorExpression unwrappedExpression = unwrapCast(expression);
+        if (!(unwrappedExpression instanceof Call call) || call.getArguments().size() != 2 || !call.getFunctionName().getName().contains("subscript")) {
+            return Optional.empty();
+        }
+
+        ConnectorExpression base = unwrapCast(call.getArguments().get(0));
+        ConnectorExpression index = unwrapCast(call.getArguments().get(1));
+        if (!(base instanceof io.trino.spi.expression.Variable variable) || !(index instanceof Constant constant) || !(constant.getValue() instanceof Slice slice)) {
+            return Optional.empty();
+        }
+
+        ColumnHandle columnHandle = assignments.get(variable.getName());
+        if (!(columnHandle instanceof VictoriaMetricsColumnHandle victoriaMetricsColumnHandle) || !victoriaMetricsColumnHandle.columnName().equals("labels")) {
+            return Optional.empty();
+        }
+
+        return Optional.of(slice.toStringUtf8());
+    }
+
+    private static ConnectorExpression unwrapCast(ConnectorExpression expression)
+    {
+        ConnectorExpression current = expression;
+        while (current instanceof Call call && call.getFunctionName().equals(CAST_FUNCTION_NAME) && call.getArguments().size() == 1) {
+            current = call.getArguments().get(0);
+        }
+        return current;
+    }
+
+    static record LabelPushdownResult(Map<String, String> labelMatchers, ConnectorExpression remainingExpression, boolean unsatisfiable)
+    {
+        LabelPushdownResult
+        {
+            requireNonNull(labelMatchers, "labelMatchers is null");
+            requireNonNull(remainingExpression, "remainingExpression is null");
+        }
+    }
+
+    private record LabelMatcher(String label, String value)
+    {
+        private LabelMatcher
+        {
+            requireNonNull(label, "label is null");
+            requireNonNull(value, "value is null");
+        }
     }
 }
