@@ -105,7 +105,6 @@
         <module>plugin/trino-pinot</module>
         <module>plugin/trino-postgresql</module>
         <module>plugin/trino-prometheus</module>
-        <module>plugin/trino-victoriametrics</module>
         <module>plugin/trino-ranger</module>
         <module>plugin/trino-redis</module>
         <module>plugin/trino-redshift</module>
@@ -121,6 +120,7 @@
         <module>plugin/trino-thrift-testing-server</module>
         <module>plugin/trino-tpcds</module>
         <module>plugin/trino-tpch</module>
+        <module>plugin/trino-victoriametrics</module>
         <module>service/trino-proxy</module>
         <module>service/trino-verifier</module>
         <module>testing/trino-benchmark-queries</module>
