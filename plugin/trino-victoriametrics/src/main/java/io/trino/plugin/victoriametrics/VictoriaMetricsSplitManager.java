@@ -113,7 +113,7 @@ public class VictoriaMetricsSplitManager
     }
 
     // HttpUriBuilder handles URI encode
-    private static URI buildQuery(URI baseURI, String time, String metricName, Map<String, String> labelMatchers, Duration queryChunkSizeDuration)
+        private static URI buildQuery(URI baseURI, String time, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
             throws URISyntaxException
     {
         return HttpUriBuilder.uriBuilderFrom(baseURI)
@@ -123,11 +123,11 @@ public class VictoriaMetricsSplitManager
                 .build();
     }
 
-    static String renderQuery(String metricName, Map<String, String> labelMatchers, Duration queryChunkSizeDuration)
+    static String renderQuery(String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
     {
         String selector = labelMatchers.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
-                .map(entry -> entry.getKey() + "=\"" + escapeLabelValue(entry.getValue()) + "\"")
+                .map(entry -> renderLabelMatcher(entry.getKey(), entry.getValue()))
                 .collect(Collectors.joining(",", "{", "}"));
 
         String rangeSelector = "[" + queryChunkSizeDuration.roundTo(queryChunkSizeDuration.getUnit()) + Duration.timeUnitToString(queryChunkSizeDuration.getUnit()) + "]";
@@ -144,6 +144,12 @@ public class VictoriaMetricsSplitManager
                 .replace("\n", "\\n")
                 .replace("\t", "\\t")
                 .replace("\"", "\\\"");
+    }
+
+    private static String renderLabelMatcher(String labelName, VictoriaMetricsLabelMatcher matcher)
+    {
+        String operator = matcher.type() == VictoriaMetricsLabelMatcher.MatchType.REGEX ? "=~" : "=";
+        return labelName + operator + "\"" + escapeLabelValue(matcher.value()) + "\"";
     }
 
     /**

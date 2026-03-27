@@ -37,6 +37,8 @@ import okhttp3.ResponseBody;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -162,10 +164,18 @@ public class VictoriaMetricsClient
     private Map<String, Object> fetchMetrics(JsonCodec<Map<String, Object>> metricsCodec, URI metadataUri)
     {
         try (ResponseBody body = fetchUri(metadataUri); InputStream inputStream = body.byteStream()) {
-            return metricsCodec.fromJson(inputStream);
+            return parseMetricsResponse(metricsCodec, inputStream);
         }
         catch (IOException e) {
-            throw new TrinoException(VICTORIA_METRICS_UNKNOWN_ERROR, "Error reading metadata", e);
+            throw new TrinoException(VICTORIA_METRICS_UNKNOWN_ERROR, "Error reading metadata from " + metadataUri, e);
+        }
+    }
+
+    static Map<String, Object> parseMetricsResponse(JsonCodec<Map<String, Object>> metricsCodec, InputStream inputStream)
+            throws IOException
+    {
+        try (Reader reader = new InputStreamReader(inputStream, UTF_8)) {
+            return metricsCodec.fromJson(reader);
         }
     }
 

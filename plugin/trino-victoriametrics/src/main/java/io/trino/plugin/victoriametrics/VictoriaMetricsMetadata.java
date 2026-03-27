@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.slice.Slice;
+import io.airlift.slice.SliceUtf8;
 import com.google.inject.Inject;
 import io.trino.plugin.base.expression.ConnectorExpressions;
 import io.trino.spi.TrinoException;
@@ -46,19 +47,26 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.UnaryOperator;
+import java.util.stream.IntStream;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.spi.expression.Constant.TRUE;
 import static io.trino.spi.expression.StandardFunctions.CAST_FUNCTION_NAME;
 import static io.trino.spi.expression.StandardFunctions.EQUAL_OPERATOR_FUNCTION_NAME;
 import static io.trino.spi.expression.StandardFunctions.IDENTICAL_OPERATOR_FUNCTION_NAME;
+import static io.trino.spi.expression.StandardFunctions.LIKE_FUNCTION_NAME;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
+import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.connector.RelationColumnsMetadata.forTable;
 import static java.util.Objects.requireNonNull;
 
 public class VictoriaMetricsMetadata
         implements ConnectorMetadata
 {
+    private static final Set<Integer> REGEXP_RESERVED_CHARACTERS = IntStream.of('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '#', '@', '&', '<', '>', '~')
+        .boxed()
+        .collect(ImmutableSet.toImmutableSet());
+
     private final VictoriaMetricsClient victoriaMetricsClient;
 
     @Inject
@@ -209,9 +217,9 @@ public class VictoriaMetricsMetadata
                 false));
     }
 
-    static LabelPushdownResult extractLabelPushdown(ConnectorExpression expression, Map<String, ColumnHandle> assignments, Map<String, String> existingMatchers)
+    static LabelPushdownResult extractLabelPushdown(ConnectorExpression expression, Map<String, ColumnHandle> assignments, Map<String, VictoriaMetricsLabelMatcher> existingMatchers)
     {
-        Map<String, String> labelMatchers = new LinkedHashMap<>(existingMatchers);
+        Map<String, VictoriaMetricsLabelMatcher> labelMatchers = new LinkedHashMap<>(existingMatchers);
         ImmutableList.Builder<ConnectorExpression> remainingExpressions = ImmutableList.builder();
 
         for (ConnectorExpression conjunct : ConnectorExpressions.extractConjuncts(expression)) {
@@ -221,8 +229,8 @@ public class VictoriaMetricsMetadata
                 continue;
             }
 
-            String existingValue = labelMatchers.putIfAbsent(labelMatcher.get().label(), labelMatcher.get().value());
-            if (existingValue != null && !existingValue.equals(labelMatcher.get().value())) {
+            VictoriaMetricsLabelMatcher existingValue = labelMatchers.putIfAbsent(labelMatcher.get().label(), labelMatcher.get().matcher());
+            if (existingValue != null && !existingValue.equals(labelMatcher.get().matcher())) {
                 return new LabelPushdownResult(ImmutableMap.copyOf(labelMatchers), TRUE, true);
             }
         }
@@ -232,19 +240,26 @@ public class VictoriaMetricsMetadata
 
     private static Optional<LabelMatcher> tryExtractLabelMatcher(ConnectorExpression expression, Map<String, ColumnHandle> assignments)
     {
-        if (!(expression instanceof Call call) || call.getArguments().size() != 2) {
+        if (!(expression instanceof Call call)) {
             return Optional.empty();
         }
 
-        if (!call.getFunctionName().equals(EQUAL_OPERATOR_FUNCTION_NAME) && !call.getFunctionName().equals(IDENTICAL_OPERATOR_FUNCTION_NAME)) {
-            return Optional.empty();
+        if (call.getFunctionName().equals(EQUAL_OPERATOR_FUNCTION_NAME) || call.getFunctionName().equals(IDENTICAL_OPERATOR_FUNCTION_NAME)) {
+            if (call.getArguments().size() != 2) {
+                return Optional.empty();
+            }
+            return tryExtractEqualLabelMatcher(call.getArguments().get(0), call.getArguments().get(1), assignments)
+                    .or(() -> tryExtractEqualLabelMatcher(call.getArguments().get(1), call.getArguments().get(0), assignments));
         }
 
-        return tryExtractLabelMatcher(call.getArguments().get(0), call.getArguments().get(1), assignments)
-                .or(() -> tryExtractLabelMatcher(call.getArguments().get(1), call.getArguments().get(0), assignments));
+        if (call.getFunctionName().equals(LIKE_FUNCTION_NAME)) {
+            return tryExtractLikeLabelMatcher(call, assignments);
+        }
+
+        return Optional.empty();
     }
 
-    private static Optional<LabelMatcher> tryExtractLabelMatcher(ConnectorExpression left, ConnectorExpression right, Map<String, ColumnHandle> assignments)
+    private static Optional<LabelMatcher> tryExtractEqualLabelMatcher(ConnectorExpression left, ConnectorExpression right, Map<String, ColumnHandle> assignments)
     {
         Optional<String> labelName = tryExtractLabelName(left, assignments);
         if (labelName.isEmpty()) {
@@ -256,7 +271,38 @@ public class VictoriaMetricsMetadata
             return Optional.empty();
         }
 
-        return Optional.of(new LabelMatcher(labelName.get(), slice.toStringUtf8()));
+        return Optional.of(new LabelMatcher(labelName.get(), new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, slice.toStringUtf8())));
+    }
+
+    private static Optional<LabelMatcher> tryExtractLikeLabelMatcher(Call call, Map<String, ColumnHandle> assignments)
+    {
+        List<ConnectorExpression> arguments = call.getArguments();
+        if (arguments.size() < 2 || arguments.size() > 3) {
+            return Optional.empty();
+        }
+
+        Optional<String> labelName = tryExtractLabelName(arguments.get(0), assignments);
+        if (labelName.isEmpty()) {
+            return Optional.empty();
+        }
+
+        ConnectorExpression patternExpression = unwrapCast(arguments.get(1));
+        if (!(patternExpression instanceof Constant patternConstant) || !(patternConstant.getValue() instanceof Slice pattern)) {
+            return Optional.empty();
+        }
+
+        Optional<Slice> escape = Optional.empty();
+        if (arguments.size() == 3) {
+            ConnectorExpression escapeExpression = unwrapCast(arguments.get(2));
+            if (!(escapeExpression instanceof Constant escapeConstant) || !(escapeConstant.getValue() instanceof Slice escapeSlice)) {
+                return Optional.empty();
+            }
+            escape = Optional.of(escapeSlice);
+        }
+
+        return Optional.of(new LabelMatcher(
+                labelName.get(),
+                new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.REGEX, likeToRegexp(pattern, escape))));
     }
 
     private static Optional<String> tryExtractLabelName(ConnectorExpression expression, Map<String, ColumnHandle> assignments)
@@ -289,7 +335,63 @@ public class VictoriaMetricsMetadata
         return current;
     }
 
-    static record LabelPushdownResult(Map<String, String> labelMatchers, ConnectorExpression remainingExpression, boolean unsatisfiable)
+    static String likeToRegexp(Slice pattern, Optional<Slice> escape)
+    {
+        Optional<Character> escapeChar = escape.map(VictoriaMetricsMetadata::getEscapeChar);
+        StringBuilder regex = new StringBuilder();
+        boolean escaped = false;
+        int position = 0;
+        while (position < pattern.length()) {
+            int currentChar = SliceUtf8.getCodePointAt(pattern, position);
+            position += SliceUtf8.lengthOfCodePoint(currentChar);
+            checkEscape(!escaped || currentChar == '%' || currentChar == '_' || currentChar == escapeChar.get());
+            if (!escaped && escapeChar.isPresent() && currentChar == escapeChar.get()) {
+                escaped = true;
+            }
+            else {
+                switch (currentChar) {
+                    case '%':
+                        regex.append(escaped ? "%" : ".*");
+                        escaped = false;
+                        break;
+                    case '_':
+                        regex.append(escaped ? "_" : ".");
+                        escaped = false;
+                        break;
+                    case '\\':
+                        regex.append("\\\\");
+                        break;
+                    default:
+                        if (REGEXP_RESERVED_CHARACTERS.contains(currentChar)) {
+                            regex.append('\\');
+                        }
+                        regex.appendCodePoint(currentChar);
+                        escaped = false;
+                }
+            }
+        }
+
+        checkEscape(!escaped);
+        return regex.toString();
+    }
+
+    private static void checkEscape(boolean condition)
+    {
+        if (!condition) {
+            throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "Escape character must be followed by '%', '_' or the escape character itself");
+        }
+    }
+
+    private static char getEscapeChar(Slice escape)
+    {
+        String escapeString = escape.toStringUtf8();
+        if (escapeString.length() == 1) {
+            return escapeString.charAt(0);
+        }
+        throw new TrinoException(INVALID_FUNCTION_ARGUMENT, "Escape string must be a single character");
+    }
+
+    static record LabelPushdownResult(Map<String, VictoriaMetricsLabelMatcher> labelMatchers, ConnectorExpression remainingExpression, boolean unsatisfiable)
     {
         LabelPushdownResult
         {
@@ -298,12 +400,12 @@ public class VictoriaMetricsMetadata
         }
     }
 
-    private record LabelMatcher(String label, String value)
+    private record LabelMatcher(String label, VictoriaMetricsLabelMatcher matcher)
     {
         private LabelMatcher
         {
             requireNonNull(label, "label is null");
-            requireNonNull(value, "value is null");
+            requireNonNull(matcher, "matcher is null");
         }
     }
 }
