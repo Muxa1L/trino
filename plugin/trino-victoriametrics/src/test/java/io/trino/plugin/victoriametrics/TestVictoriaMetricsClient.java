@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -41,5 +42,22 @@ public class TestVictoriaMetricsClient
 
         assertThat(parsed).containsEntry("status", "success");
         assertThat(parsed.get("data")).isEqualTo(List.of("cpu_usage_total", "memory_é"));
+    }
+
+    @Test
+    public void testParseExportResponse()
+            throws IOException
+    {
+        String export = """
+                {"metric":{"__name__":"up","job":"node_exporter","instance":"localhost:9100"},"values":[0,1.5],"timestamps":[1549891472010,1549891487724]}
+                {"metric":{"__name__":"up","job":"prometheus","instance":"localhost:9090"},"values":[1],"timestamps":[1549891491511]}
+                """;
+
+        List<VictoriaMetricsStandardizedRow> rows = new VictoriaMetricsExportResponseParse(new ByteArrayInputStream(export.getBytes(UTF_8))).getRows();
+
+        assertThat(rows).containsExactly(
+                new VictoriaMetricsStandardizedRow(Map.of("__name__", "up", "job", "node_exporter", "instance", "localhost:9100"), Instant.ofEpochMilli(1549891472010L), 0.0),
+                new VictoriaMetricsStandardizedRow(Map.of("__name__", "up", "job", "node_exporter", "instance", "localhost:9100"), Instant.ofEpochMilli(1549891487724L), 1.5),
+                new VictoriaMetricsStandardizedRow(Map.of("__name__", "up", "job", "prometheus", "instance", "localhost:9090"), Instant.ofEpochMilli(1549891491511L), 1.0));
     }
 }

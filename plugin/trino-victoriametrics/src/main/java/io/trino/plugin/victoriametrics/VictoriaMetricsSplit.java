@@ -34,12 +34,16 @@ public class VictoriaMetricsSplit
     private static final int INSTANCE_SIZE = instanceSize(VictoriaMetricsSplit.class);
 
     private final String uri;
+    private final VictoriaMetricsQueryMode queryMode;
     private final List<HostAddress> addresses;
 
     @JsonCreator
-    public VictoriaMetricsSplit(@JsonProperty("uri") String uri)
+    public VictoriaMetricsSplit(
+            @JsonProperty("uri") String uri,
+            @JsonProperty("queryMode") VictoriaMetricsQueryMode queryMode)
     {
         this.uri = requireNonNull(uri, "uri is null");
+        this.queryMode = requireNonNull(queryMode, "queryMode is null");
 
         addresses = ImmutableList.of(HostAddress.fromUri(URI.create(uri)));
     }
@@ -48,6 +52,12 @@ public class VictoriaMetricsSplit
     public String getUri()
     {
         return uri;
+    }
+
+    @JsonProperty
+    public VictoriaMetricsQueryMode getQueryMode()
+    {
+        return queryMode;
     }
 
     @Override
@@ -69,6 +79,7 @@ public class VictoriaMetricsSplit
     {
         return INSTANCE_SIZE
                 + estimatedSizeOf(uri)
+                + estimatedSizeOf(queryMode.name())
                 + estimatedSizeOf(addresses, HostAddress::getRetainedSizeInBytes);
     }
 }

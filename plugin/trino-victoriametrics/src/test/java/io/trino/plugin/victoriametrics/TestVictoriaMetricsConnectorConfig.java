@@ -39,6 +39,7 @@ public class TestVictoriaMetricsConnectorConfig
         assertRecordedDefaults(recordDefaults(VictoriaMetricsConnectorConfig.class)
                 .setUri(URI.create("http://localhost:8481"))
                 .setTenantId("multitenant")
+                .setQueryMode(VictoriaMetricsQueryMode.QUERY)
                 .setQueryChunkSizeDuration(new Duration(1, DAYS))
                 .setMaxQueryRangeDuration(new Duration(21, DAYS))
                 .setCacheDuration(new Duration(30, SECONDS))
@@ -57,6 +58,7 @@ public class TestVictoriaMetricsConnectorConfig
         Map<String, String> properties = ImmutableMap.<String, String>builder()
                 .put("victoriametrics.uri", "http://vmselect:8481")
                 .put("victoriametrics.tenant-id", "7:9")
+                .put("victoriametrics.query.mode", "EXPORT")
                 .put("victoriametrics.query.chunk.size.duration", "365d")
                 .put("victoriametrics.max.query.range.duration", "1095d")
                 .put("victoriametrics.cache.ttl", "60s")
@@ -72,6 +74,7 @@ public class TestVictoriaMetricsConnectorConfig
 
         assertThat(config.getUri()).isEqualTo(URI.create("http://vmselect:8481"));
         assertThat(config.getTenantId()).isEqualTo("7:9");
+        assertThat(config.getQueryMode()).isEqualTo(VictoriaMetricsQueryMode.EXPORT);
         assertThat(config.getQueryChunkSizeDuration()).isEqualTo(new Duration(365, DAYS));
         assertThat(config.getMaxQueryRangeDuration()).isEqualTo(new Duration(1095, DAYS));
         assertThat(config.getCacheDuration()).isEqualTo(new Duration(60, SECONDS));

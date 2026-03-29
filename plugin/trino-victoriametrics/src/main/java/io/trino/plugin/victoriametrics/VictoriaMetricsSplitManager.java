@@ -18,7 +18,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.inject.Inject;
 import io.airlift.http.client.HttpUriBuilder;
 import io.airlift.units.Duration;
-import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorSplit;
@@ -37,7 +36,6 @@ import io.trino.spi.predicate.TupleDomain;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -47,9 +45,9 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static io.trino.plugin.victoriametrics.VictoriaMetricsClient.TIMESTAMP_COLUMN_TYPE;
-import static io.trino.plugin.victoriametrics.VictoriaMetricsErrorCode.VICTORIA_METRICS_UNKNOWN_ERROR;
 import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.getMaxQueryRange;
 import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.getQueryChunkSize;
+import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.getQueryMode;
 import static io.trino.spi.type.DateTimeEncoding.unpackMillisUtc;
 import static java.time.Instant.ofEpochMilli;
 import static java.util.Objects.requireNonNull;
@@ -93,28 +91,30 @@ public class VictoriaMetricsSplitManager
 
         Duration maxQueryRangeDuration = getMaxQueryRange(session);
         Duration queryChunkSizeDuration = getQueryChunkSize(session);
+        VictoriaMetricsQueryMode queryMode = getQueryMode(session);
 
-        List<ConnectorSplit> splits = generateTimesForSplits(victoriaMetricsClock.now(), maxQueryRangeDuration, queryChunkSizeDuration, tableHandle)
-                .stream()
-                .map(time -> {
-                    try {
-                        return new VictoriaMetricsSplit(buildQuery(
-                                victoriaMetricsURI,
-                                time,
-                                table.name(),
-                                tableHandle.labelMatchers(),
-                                queryChunkSizeDuration).toString());
-                    }
-                    catch (URISyntaxException e) {
-                        throw new TrinoException(VICTORIA_METRICS_UNKNOWN_ERROR, "split URI invalid: " + e.getMessage());
-                    }
-                }).collect(Collectors.toList());
+        List<ConnectorSplit> splits = switch (queryMode) {
+            case QUERY -> generateTimesForSplits(victoriaMetricsClock.now(), maxQueryRangeDuration, queryChunkSizeDuration, tableHandle).stream()
+                .map(time -> new VictoriaMetricsSplit(buildQuery(
+                    victoriaMetricsURI,
+                    time,
+                    table.name(),
+                    tableHandle.labelMatchers(),
+                    queryChunkSizeDuration).toString(), queryMode))
+                .collect(Collectors.toList());
+            case EXPORT -> generateExportRanges(victoriaMetricsClock.now(), maxQueryRangeDuration, queryChunkSizeDuration, tableHandle).stream()
+                .map(range -> new VictoriaMetricsSplit(buildExportQuery(
+                    victoriaMetricsURI,
+                    range,
+                    table.name(),
+                    tableHandle.labelMatchers()).toString(), queryMode))
+                .collect(Collectors.toList());
+        };
         return new FixedSplitSource(splits);
     }
 
     // HttpUriBuilder handles URI encode
-    private static URI buildQuery(URI baseURI, String time, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
-            throws URISyntaxException
+    static URI buildQuery(URI baseURI, String time, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
     {
         return HttpUriBuilder.uriBuilderFrom(baseURI)
                 .appendPath("api/v1/query")
@@ -123,18 +123,32 @@ public class VictoriaMetricsSplitManager
                 .build();
     }
 
+    static URI buildExportQuery(URI baseURI, TimeRange range, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers)
+    {
+        return HttpUriBuilder.uriBuilderFrom(baseURI)
+                .appendPath("api/v1/export")
+                .addParameter("match[]", renderMatchExpression(metricName, labelMatchers))
+                .addParameter("start", decimalSecondString(range.startTimeMillis()))
+                .addParameter("end", decimalSecondString(range.endTimeMillis()))
+                .build();
+    }
+
     static String renderQuery(String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
     {
-        String selector = labelMatchers.entrySet().stream()
+        String rangeSelector = "[" + queryChunkSizeDuration.roundTo(queryChunkSizeDuration.getUnit()) + Duration.timeUnitToString(queryChunkSizeDuration.getUnit()) + "]";
+        return renderMatchExpression(metricName, labelMatchers) + rangeSelector;
+    }
+
+    static String renderMatchExpression(String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers)
+    {
+        if (labelMatchers.isEmpty()) {
+            return metricName;
+        }
+
+        return metricName + labelMatchers.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> renderLabelMatcher(entry.getKey(), entry.getValue()))
                 .collect(Collectors.joining(",", "{", "}"));
-
-        String rangeSelector = "[" + queryChunkSizeDuration.roundTo(queryChunkSizeDuration.getUnit()) + Duration.timeUnitToString(queryChunkSizeDuration.getUnit()) + "]";
-        if (labelMatchers.isEmpty()) {
-            return metricName + rangeSelector;
-        }
-        return metricName + selector + rangeSelector;
     }
 
     private static String escapeLabelValue(String value)
@@ -166,23 +180,12 @@ public class VictoriaMetricsSplitManager
     protected static List<String> generateTimesForSplits(Instant defaultUpperBound, Duration maxQueryRangeDurationRequested, Duration queryChunkSizeDurationRequested,
             VictoriaMetricsTableHandle tableHandle)
     {
-        Optional<VictoriaMetricsPredicateTimeInfo> predicateRange = tableHandle.predicate()
-                .flatMap(VictoriaMetricsSplitManager::determinePredicateTimes);
-
-        EffectiveLimits effectiveLimits = new EffectiveLimits(defaultUpperBound, maxQueryRangeDurationRequested, predicateRange);
+        EffectiveLimits effectiveLimits = getEffectiveLimits(defaultUpperBound, maxQueryRangeDurationRequested, tableHandle);
         Instant upperBound = effectiveLimits.getUpperBound();
         java.time.Duration maxQueryRangeDuration = effectiveLimits.getMaxQueryRangeDuration();
 
         java.time.Duration queryChunkSizeDuration = java.time.Duration.ofMillis(queryChunkSizeDurationRequested.toMillis());
-        if (maxQueryRangeDuration.isNegative()) {
-            throw new IllegalArgumentException("VictoriaMetrics.max.query.range.duration may not be negative");
-        }
-        if (queryChunkSizeDuration.isNegative()) {
-            throw new IllegalArgumentException("VictoriaMetrics.query.chunk.size.duration may not be negative");
-        }
-        if (queryChunkSizeDuration.isZero()) {
-            throw new IllegalArgumentException("VictoriaMetrics.query.chunk.size.duration may not be zero");
-        }
+        validateDurations(maxQueryRangeDuration, queryChunkSizeDuration);
         BigDecimal maxQueryRangeDecimal = BigDecimal.valueOf(maxQueryRangeDuration.getSeconds()).add(BigDecimal.valueOf(maxQueryRangeDuration.getNano(), 9));
         BigDecimal queryChunkSizeDecimal = BigDecimal.valueOf(queryChunkSizeDuration.getSeconds()).add(BigDecimal.valueOf(queryChunkSizeDuration.getNano(), 9));
 
@@ -197,6 +200,47 @@ public class VictoriaMetricsSplitManager
                 .map(VictoriaMetricsSplitManager::decimalSecondString)
                 .collect(Collectors.toList())
                 .reversed();
+    }
+
+    protected static List<TimeRange> generateExportRanges(Instant defaultUpperBound, Duration maxQueryRangeDurationRequested, Duration queryChunkSizeDurationRequested, VictoriaMetricsTableHandle tableHandle)
+    {
+        EffectiveLimits effectiveLimits = getEffectiveLimits(defaultUpperBound, maxQueryRangeDurationRequested, tableHandle);
+        long upperBoundMillis = effectiveLimits.getUpperBound().toEpochMilli();
+        java.time.Duration maxQueryRangeDuration = effectiveLimits.getMaxQueryRangeDuration();
+        java.time.Duration queryChunkSizeDuration = java.time.Duration.ofMillis(queryChunkSizeDurationRequested.toMillis());
+
+        validateDurations(maxQueryRangeDuration, queryChunkSizeDuration);
+
+        long lowerBoundMillis = upperBoundMillis - maxQueryRangeDuration.toMillis();
+        ImmutableList.Builder<TimeRange> ranges = ImmutableList.builder();
+        for (long startTime = lowerBoundMillis; startTime <= upperBoundMillis; startTime += queryChunkSizeDuration.toMillis()) {
+            long endTime = Math.min(startTime + queryChunkSizeDuration.toMillis() - OFFSET_MILLIS, upperBoundMillis);
+            ranges.add(new TimeRange(startTime, endTime));
+            if (endTime == upperBoundMillis) {
+                break;
+            }
+        }
+        return ranges.build();
+    }
+
+    private static EffectiveLimits getEffectiveLimits(Instant defaultUpperBound, Duration maxQueryRangeDurationRequested, VictoriaMetricsTableHandle tableHandle)
+    {
+        Optional<VictoriaMetricsPredicateTimeInfo> predicateRange = tableHandle.predicate()
+                .flatMap(VictoriaMetricsSplitManager::determinePredicateTimes);
+        return new EffectiveLimits(defaultUpperBound, maxQueryRangeDurationRequested, predicateRange);
+    }
+
+    private static void validateDurations(java.time.Duration maxQueryRangeDuration, java.time.Duration queryChunkSizeDuration)
+    {
+        if (maxQueryRangeDuration.isNegative()) {
+            throw new IllegalArgumentException("VictoriaMetrics.max.query.range.duration may not be negative");
+        }
+        if (queryChunkSizeDuration.isNegative()) {
+            throw new IllegalArgumentException("VictoriaMetrics.query.chunk.size.duration may not be negative");
+        }
+        if (queryChunkSizeDuration.isZero()) {
+            throw new IllegalArgumentException("VictoriaMetrics.query.chunk.size.duration may not be zero");
+        }
     }
 
     protected static Optional<VictoriaMetricsPredicateTimeInfo> determinePredicateTimes(TupleDomain<ColumnHandle> predicate)
@@ -247,6 +291,8 @@ public class VictoriaMetricsSplitManager
     {
         return new BigDecimal(Long.toString(millis)).divide(new BigDecimal(1000L)).toPlainString();
     }
+
+    record TimeRange(long startTimeMillis, long endTimeMillis) {}
 
     private static class EffectiveLimits
     {

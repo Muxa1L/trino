@@ -37,6 +37,7 @@ public class VictoriaMetricsConnectorConfig
 {
     private URI uri = URI.create("http://localhost:8481");
     private String tenantId = "multitenant";
+    private VictoriaMetricsQueryMode queryMode = VictoriaMetricsQueryMode.QUERY;
     private Duration queryChunkSizeDuration = new Duration(1, TimeUnit.DAYS);
     private Duration maxQueryRangeDuration = new Duration(21, TimeUnit.DAYS);
     private Duration cacheDuration = new Duration(30, TimeUnit.SECONDS);
@@ -83,6 +84,20 @@ public class VictoriaMetricsConnectorConfig
                 .appendPath(tenantId)
                 .appendPath("prometheus")
                 .build();
+    }
+
+    @NotNull
+    public VictoriaMetricsQueryMode getQueryMode()
+    {
+        return queryMode;
+    }
+
+    @Config("victoriametrics.query.mode")
+    @ConfigDescription("Read mode to use for data fetches: QUERY uses /api/v1/query, EXPORT uses /api/v1/export raw samples")
+    public VictoriaMetricsConnectorConfig setQueryMode(VictoriaMetricsQueryMode queryMode)
+    {
+        this.queryMode = requireNonNull(queryMode, "queryMode is null");
+        return this;
     }
 
     @MinDuration("1ms")

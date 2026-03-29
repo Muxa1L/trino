@@ -29,6 +29,7 @@ public class VictoriaMetricsRecordSet
 {
     private final List<VictoriaMetricsColumnHandle> columnHandles;
     private final List<Type> columnTypes;
+    private final VictoriaMetricsSplit split;
     private final ResponseBody responseBody;
 
     public VictoriaMetricsRecordSet(VictoriaMetricsClient victoriaMetricsClient, VictoriaMetricsSplit split, List<VictoriaMetricsColumnHandle> columnHandles)
@@ -36,6 +37,7 @@ public class VictoriaMetricsRecordSet
         requireNonNull(victoriaMetricsClient, "victoriaMetricsClient is null");
         requireNonNull(split, "split is null");
 
+        this.split = split;
         this.columnHandles = requireNonNull(columnHandles, "columnHandles is null");
         ImmutableList.Builder<Type> types = ImmutableList.builder();
         for (VictoriaMetricsColumnHandle column : columnHandles) {
@@ -55,6 +57,6 @@ public class VictoriaMetricsRecordSet
     @Override
     public RecordCursor cursor()
     {
-        return new VictoriaMetricsRecordCursor(columnHandles, responseBody);
+        return new VictoriaMetricsRecordCursor(columnHandles, split.getQueryMode(), responseBody);
     }
 }

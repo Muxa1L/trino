@@ -69,7 +69,7 @@ public class VictoriaMetricsRecordCursor
 
     private VictoriaMetricsStandardizedRow fields;
 
-    public VictoriaMetricsRecordCursor(List<VictoriaMetricsColumnHandle> columnHandles, ResponseBody responseBody)
+    public VictoriaMetricsRecordCursor(List<VictoriaMetricsColumnHandle> columnHandles, VictoriaMetricsQueryMode queryMode, ResponseBody responseBody)
     {
         this.columnHandles = columnHandles;
         this.closeResponse = responseBody::close;
@@ -81,7 +81,10 @@ public class VictoriaMetricsRecordCursor
         }
 
         try (CountingInputStream input = new CountingInputStream(responseBody.byteStream())) {
-            metricsItr = victoriaMetricsResultsInStandardizedForm(new VictoriaMetricsQueryResponseParse(input).getResults()).iterator();
+            metricsItr = switch (queryMode) {
+                case QUERY -> victoriaMetricsResultsInStandardizedForm(new VictoriaMetricsQueryResponseParse(input).getResults()).iterator();
+                case EXPORT -> new VictoriaMetricsExportResponseParse(input).getRows().iterator();
+            };
             totalBytes = input.getCount();
         }
         catch (IOException e) {

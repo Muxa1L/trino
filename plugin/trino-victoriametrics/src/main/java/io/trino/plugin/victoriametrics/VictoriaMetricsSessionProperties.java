@@ -23,12 +23,14 @@ import io.trino.spi.session.PropertyMetadata;
 import java.util.List;
 
 import static io.trino.plugin.base.session.PropertyMetadataUtil.durationProperty;
+import static io.trino.spi.session.PropertyMetadata.enumProperty;
 
 public final class VictoriaMetricsSessionProperties
         implements SessionPropertiesProvider
 {
     private static final String QUERY_CHUNK_SIZE_DURATION = "query_chunk_size_duration";
     private static final String MAX_QUERY_RANGE_DURATION = "max_query_range_duration";
+    private static final String QUERY_MODE = "query_mode";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -46,6 +48,12 @@ public final class VictoriaMetricsSessionProperties
                         "Width of overall query to VictoriaMetrics, will be divided into query_chunk_size_duration queries",
                         connectorConfig.getMaxQueryRangeDuration(),
                         false))
+                .add(enumProperty(
+                    QUERY_MODE,
+                    "Endpoint mode for reading data from VictoriaMetrics",
+                    VictoriaMetricsQueryMode.class,
+                    connectorConfig.getQueryMode(),
+                    false))
                 .build();
     }
 
@@ -63,5 +71,10 @@ public final class VictoriaMetricsSessionProperties
     public static Duration getMaxQueryRange(ConnectorSession session)
     {
         return session.getProperty(MAX_QUERY_RANGE_DURATION, Duration.class);
+    }
+
+    public static VictoriaMetricsQueryMode getQueryMode(ConnectorSession session)
+    {
+        return session.getProperty(QUERY_MODE, VictoriaMetricsQueryMode.class);
     }
 }
