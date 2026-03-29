@@ -183,13 +183,13 @@ public class VictoriaMetricsRecordCursor
         checkArgument(actual.equals(expected), "Expected field %s to be type %s but is %s", field, expected, actual);
     }
 
-        private List<VictoriaMetricsStandardizedRow> victoriaMetricsResultsInStandardizedForm(List<VictoriaMetricsMetricResult> results)
+    private List<VictoriaMetricsStandardizedRow> victoriaMetricsResultsInStandardizedForm(List<VictoriaMetricsMetricResult> results)
     {
         return results.stream().map(result ->
-            result.getTimeSeriesValues().getValues().stream().map(timeSeriesValue -> new VictoriaMetricsStandardizedRow(
+                result.getTimeSeriesValues().getValues().stream().map(timeSeriesValue -> new VictoriaMetricsStandardizedRow(
                         result.getMetricHeader(),
-                timeSeriesValue.getTimestamp(),
-                Double.parseDouble(timeSeriesValue.getValue())))
+                        timeSeriesValue.getTimestamp(),
+                        Double.parseDouble(timeSeriesValue.getValue())))
                         .collect(Collectors.toList()))
                 .flatMap(List::stream)
                 .collect(Collectors.toList());

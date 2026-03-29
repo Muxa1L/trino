@@ -17,8 +17,8 @@ import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.Slices;
 import io.airlift.units.Duration;
 import io.trino.spi.expression.Call;
-import io.trino.spi.expression.Constant;
 import io.trino.spi.expression.ConnectorExpression;
+import io.trino.spi.expression.Constant;
 import io.trino.spi.expression.FunctionName;
 import io.trino.spi.expression.Variable;
 import org.junit.jupiter.api.Test;
@@ -36,7 +36,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestVictoriaMetricsPredicatePushdown
 {
-        private static final VictoriaMetricsColumnHandle LABELS = new VictoriaMetricsColumnHandle("labels", VARCHAR, 0);
+    private static final VictoriaMetricsColumnHandle LABELS =
+            new VictoriaMetricsColumnHandle("labels", VARCHAR, 0);
 
     @Test
     public void testExtractLabelMatcherFromExpression()
@@ -112,7 +113,7 @@ public class TestVictoriaMetricsPredicatePushdown
                 ImmutableMap.of("labels", LABELS),
                 ImmutableMap.of());
 
-                assertThat(result.labelMatchers()).containsEntry("job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus"));
+        assertThat(result.labelMatchers()).containsEntry("job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus"));
         assertThat(result.remainingExpression()).isEqualTo(unhandled);
     }
 
@@ -121,31 +122,31 @@ public class TestVictoriaMetricsPredicatePushdown
     {
         String query = VictoriaMetricsSplitManager.renderQuery(
                 "up",
-                                Map.of(
-                                                "instance", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "localhost:9090"),
-                                                "job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus")),
+                Map.of(
+                        "instance", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "localhost:9090"),
+                        "job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus")),
                 new Duration(1, DAYS));
 
         assertThat(query).isEqualTo("up{instance=\"localhost:9090\",job=\"prometheus\"}[1d]");
     }
 
-        @Test
-        public void testRenderQueryWithRegexLabelMatchers()
-        {
-                String query = VictoriaMetricsSplitManager.renderQuery(
-                                "up",
-                                Map.of("label_name", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.REGEX, ".*a.b.*")),
-                                new Duration(1, DAYS));
+    @Test
+    public void testRenderQueryWithRegexLabelMatchers()
+    {
+        String query = VictoriaMetricsSplitManager.renderQuery(
+                "up",
+                Map.of("label_name", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.REGEX, ".*a.b.*")),
+                new Duration(1, DAYS));
 
-                assertThat(query).isEqualTo("up{label_name=~\".*a.b.*\"}[1d]");
-        }
+        assertThat(query).isEqualTo("up{label_name=~\".*a.b.*\"}[1d]");
+    }
 
-        @Test
-        public void testLikeToRegexp()
-        {
-                assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("a_b_c"), Optional.empty())).isEqualTo("a.b.c");
-                assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("a%b%c"), Optional.empty())).isEqualTo("a.*b.*c");
-                assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("a_\\_b"), Optional.of(Slices.utf8Slice("\\")))).isEqualTo("a._b");
-                assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("%a_b%"), Optional.empty())).isEqualTo(".*a.b.*");
-        }
+    @Test
+    public void testLikeToRegexp()
+    {
+        assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("a_b_c"), Optional.empty())).isEqualTo("a.b.c");
+        assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("a%b%c"), Optional.empty())).isEqualTo("a.*b.*c");
+        assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("a_\\_b"), Optional.of(Slices.utf8Slice("\\")))).isEqualTo("a._b");
+        assertThat(VictoriaMetricsMetadata.likeToRegexp(Slices.utf8Slice("%a_b%"), Optional.empty())).isEqualTo(".*a.b.*");
+    }
 }

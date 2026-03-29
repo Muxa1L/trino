@@ -113,7 +113,7 @@ public class VictoriaMetricsSplitManager
     }
 
     // HttpUriBuilder handles URI encode
-        private static URI buildQuery(URI baseURI, String time, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
+    private static URI buildQuery(URI baseURI, String time, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)
             throws URISyntaxException
     {
         return HttpUriBuilder.uriBuilderFrom(baseURI)

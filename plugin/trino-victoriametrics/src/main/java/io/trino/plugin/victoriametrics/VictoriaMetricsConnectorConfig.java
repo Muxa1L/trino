@@ -15,10 +15,10 @@ package io.trino.plugin.victoriametrics;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.net.HttpHeaders;
-import io.airlift.http.client.HttpUriBuilder;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.ConfigSecuritySensitive;
+import io.airlift.http.client.HttpUriBuilder;
 import io.airlift.units.Duration;
 import io.airlift.units.MinDuration;
 import jakarta.validation.constraints.AssertTrue;
