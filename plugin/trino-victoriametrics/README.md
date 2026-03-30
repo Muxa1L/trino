@@ -24,6 +24,7 @@ victoriametrics.tenant-id=multitenant
 Additional connector settings mirror the Prometheus connector and use the `victoriametrics.*` prefix, for example:
 
 ```properties
+victoriametrics.query.mode=QUERY
 victoriametrics.query.chunk.size.duration=1d
 victoriametrics.max.query.range.duration=21d
 victoriametrics.cache.ttl=30s
@@ -32,6 +33,13 @@ victoriametrics.auth.user=metrics
 victoriametrics.auth.password=secret
 victoriametrics.http.additional-headers=X-Scope-OrgID:team-a
 ```
+
+`victoriametrics.query.mode` supports:
+
+- `QUERY` for the existing `/api/v1/query` path using rollup queries.
+- `EXPORT` for `/api/v1/export`, which reads raw samples with explicit `start` and `end` ranges.
+
+The same option is also exposed as the `query_mode` catalog session property when you need to switch modes per query.
 
 ## Multitenant reads
 

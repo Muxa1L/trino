@@ -252,6 +252,12 @@
             <unpack />
         </artifact>
     </artifactSet>
+    
+    <artifactSet to="plugin/victoriametrics">
+        <artifact id="${project.groupId}:trino-victoriametrics:zip:${project.version}">
+            <unpack />
+        </artifact>
+    </artifactSet>
 
     <artifactSet to="plugin/ranger">
         <artifact id="${project.groupId}:trino-ranger:zip:${project.version}">
