@@ -28,11 +28,16 @@ victoriametrics.query.mode=QUERY
 victoriametrics.query.chunk.size.duration=1d
 victoriametrics.max.query.range.duration=21d
 victoriametrics.cache.ttl=30s
+victoriametrics.table-name-validation-enabled=false
 victoriametrics.read-timeout=10s
 victoriametrics.auth.user=metrics
 victoriametrics.auth.password=secret
 victoriametrics.http.additional-headers=X-Scope-OrgID:team-a
 ```
+
+On very large clusters, planning latency is usually dominated by metric-name enumeration through `/api/v1/label/__name__/values`. The connector currently uses that metadata path for `SHOW TABLES`, `information_schema`, and table-name validation during planning.
+
+If your queries reference known metrics directly, set `victoriametrics.table-name-validation-enabled=false` and increase `victoriametrics.cache.ttl` aggressively, for example to minutes or hours. That removes the metadata fetch from direct table queries such as `SELECT * FROM victoriametrics.default.http_requests_total ...`, but `SHOW TABLES` and `information_schema` will still enumerate metric names and remain expensive.
 
 `victoriametrics.query.mode` supports:
 

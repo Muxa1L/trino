@@ -47,7 +47,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import static com.google.common.base.Verify.verify;
 import static com.google.common.net.HttpHeaders.AUTHORIZATION;
 import static io.trino.plugin.victoriametrics.VictoriaMetricsErrorCode.VICTORIA_METRICS_TABLES_METRICS_RETRIEVE_ERROR;
 import static io.trino.plugin.victoriametrics.VictoriaMetricsErrorCode.VICTORIA_METRICS_UNKNOWN_ERROR;
@@ -56,7 +55,6 @@ import static io.trino.spi.type.TimestampWithTimeZoneType.createTimestampWithTim
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.Files.readString;
-import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -68,6 +66,7 @@ public class VictoriaMetricsClient
     private final OkHttpClient httpClient;
     private final Supplier<Map<String, Object>> tableSupplier;
     private final Type varcharMapType;
+    private final boolean tableNameValidationEnabled;
     private final boolean caseInsensitiveNameMatching;
 
     @Inject
@@ -88,6 +87,7 @@ public class VictoriaMetricsClient
                 config.getCacheDuration().toMillis(),
                 MILLISECONDS);
         varcharMapType = new MapType(VARCHAR, VARCHAR, typeManager.getTypeOperators());
+        this.tableNameValidationEnabled = config.isTableNameValidationEnabled();
         this.caseInsensitiveNameMatching = config.isCaseInsensitiveNameMatching();
     }
 
@@ -95,6 +95,30 @@ public class VictoriaMetricsClient
     {
         // endpoint to retrieve metric names from VictoriaMetrics
         return HttpUriBuilder.uriBuilderFrom(victoriaMetricsUri).appendPath(METRICS_ENDPOINT).build();
+    }
+
+    @Nullable
+    static String toRemoteTableName(String tableName, @Nullable List<String> tableNames, boolean caseInsensitiveNameMatching)
+    {
+        requireNonNull(tableName, "tableName is null");
+        if (tableNames == null) {
+            return null;
+        }
+
+        if (!caseInsensitiveNameMatching) {
+            if (tableNames.contains(tableName)) {
+                return tableName;
+            }
+            return null;
+        }
+
+        for (String remoteTableName : tableNames) {
+            if (tableName.equalsIgnoreCase(remoteTableName)) {
+                return remoteTableName;
+            }
+        }
+
+        return null;
     }
 
     public Set<String> getTableNames(String schema)
@@ -124,41 +148,32 @@ public class VictoriaMetricsClient
             return null;
         }
 
+        if (!tableNameValidationEnabled && !caseInsensitiveNameMatching) {
+            return createTable(tableName);
+        }
+
         String remoteTableName = toRemoteTableName(tableName);
         if (remoteTableName == null) {
             return null;
         }
+        return createTable(remoteTableName);
+    }
+
+    @Nullable
+    private String toRemoteTableName(String tableName)
+    {
+        List<String> tableNames = (List<String>) tableSupplier.get().get("data");
+        return toRemoteTableName(tableName, tableNames, caseInsensitiveNameMatching);
+    }
+
+    private VictoriaMetricsTable createTable(String remoteTableName)
+    {
         return new VictoriaMetricsTable(
                 remoteTableName,
                 ImmutableList.of(
                         new ColumnMetadata("labels", varcharMapType),
                         new ColumnMetadata("timestamp", TIMESTAMP_COLUMN_TYPE),
                         new ColumnMetadata("value", DoubleType.DOUBLE)));
-    }
-
-    @Nullable
-    private String toRemoteTableName(String tableName)
-    {
-        verify(tableName.equals(tableName.toLowerCase(ENGLISH)), "tableName not in lower-case: %s", tableName);
-        List<String> tableNames = (List<String>) tableSupplier.get().get("data");
-        if (tableNames == null) {
-            return null;
-        }
-
-        if (!caseInsensitiveNameMatching) {
-            if (tableNames.contains(tableName)) {
-                return tableName;
-            }
-        }
-        else {
-            for (String remoteTableName : tableNames) {
-                if (tableName.equals(remoteTableName.toLowerCase(ENGLISH))) {
-                    return remoteTableName;
-                }
-            }
-        }
-
-        return null;
     }
 
     private Map<String, Object> fetchMetrics(JsonCodec<Map<String, Object>> metricsCodec, URI metadataUri)

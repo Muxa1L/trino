@@ -48,6 +48,7 @@ public class TestVictoriaMetricsConnectorConfig
                 .setUser(null)
                 .setPassword(null)
                 .setReadTimeout(new Duration(10, SECONDS))
+                .setTableNameValidationEnabled(true)
                 .setCaseInsensitiveNameMatching(false)
                 .setAdditionalHeaders(null));
     }
@@ -65,6 +66,7 @@ public class TestVictoriaMetricsConnectorConfig
                 .put("victoriametrics.auth.http.header.name", "X-team-auth")
                 .put("victoriametrics.bearer.token.file", "/tmp/bearer_token.txt")
                 .put("victoriametrics.read-timeout", "30s")
+                .put("victoriametrics.table-name-validation-enabled", "false")
                 .put("victoriametrics.case-insensitive-name-matching", "true")
                 .put("victoriametrics.http.additional-headers", "key\\:1:value\\,1, key\\,2:value\\:2")
                 .buildOrThrow();
@@ -83,6 +85,7 @@ public class TestVictoriaMetricsConnectorConfig
         assertThat(config.getUser()).isEmpty();
         assertThat(config.getPassword()).isEmpty();
         assertThat(config.getReadTimeout()).isEqualTo(new Duration(30, SECONDS));
+                assertThat(config.isTableNameValidationEnabled()).isFalse();
         assertThat(config.isCaseInsensitiveNameMatching()).isTrue();
         assertThat(config.getAdditionalHeaders()).isEqualTo(ImmutableMap.of("key\\:1", "value\\,1", "key\\,2", "value\\:2"));
     }

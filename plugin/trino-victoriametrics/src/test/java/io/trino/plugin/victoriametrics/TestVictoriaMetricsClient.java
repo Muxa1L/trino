@@ -15,6 +15,11 @@ package io.trino.plugin.victoriametrics;
 
 import io.airlift.json.JsonCodec;
 import io.airlift.json.JsonCodecFactory;
+import io.trino.spi.type.Type;
+import io.trino.spi.type.TypeId;
+import io.trino.spi.type.TypeManager;
+import io.trino.spi.type.TypeOperators;
+import io.trino.spi.type.TypeSignature;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -29,6 +34,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TestVictoriaMetricsClient
 {
     private static final JsonCodec<Map<String, Object>> METRIC_CODEC = new JsonCodecFactory().mapJsonCodec(String.class, Object.class);
+        private static final TypeManager TYPE_MANAGER = new TypeManager()
+        {
+                @Override
+                public Type getType(TypeSignature signature)
+                {
+                        throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public Type fromSqlType(String type)
+                {
+                        throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public Type getType(TypeId id)
+                {
+                        throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public TypeOperators getTypeOperators()
+                {
+                        return new TypeOperators();
+                }
+        };
 
     @Test
     public void testParseMetricsResponseWithUtf8Reader()
@@ -59,5 +90,42 @@ public class TestVictoriaMetricsClient
                 new VictoriaMetricsStandardizedRow(Map.of("__name__", "up", "job", "node_exporter", "instance", "localhost:9100"), Instant.ofEpochMilli(1549891472010L), 0.0),
                 new VictoriaMetricsStandardizedRow(Map.of("__name__", "up", "job", "node_exporter", "instance", "localhost:9100"), Instant.ofEpochMilli(1549891487724L), 1.5),
                 new VictoriaMetricsStandardizedRow(Map.of("__name__", "up", "job", "prometheus", "instance", "localhost:9090"), Instant.ofEpochMilli(1549891491511L), 1.0));
+    }
+
+    @Test
+    public void testToRemoteTableNamePreservesCaseWhenCaseSensitive()
+    {
+        assertThat(VictoriaMetricsClient.toRemoteTableName("MixedCaseMetric", List.of("MixedCaseMetric"), false))
+                .isEqualTo("MixedCaseMetric");
+        assertThat(VictoriaMetricsClient.toRemoteTableName("mixedcasemetric", List.of("MixedCaseMetric"), false))
+                .isNull();
+    }
+
+    @Test
+    public void testToRemoteTableNameSupportsMixedCaseCaseInsensitiveLookup()
+    {
+        assertThat(VictoriaMetricsClient.toRemoteTableName("MixedCaseMetric", List.of("mixedcasemetric"), true))
+                .isEqualTo("mixedcasemetric");
+        assertThat(VictoriaMetricsClient.toRemoteTableName("mixedcasemetric", List.of("MixedCaseMetric"), true))
+                .isEqualTo("MixedCaseMetric");
+        assertThat(VictoriaMetricsClient.toRemoteTableName("MiXeDcAsEmEtRiC", List.of("MixedCaseMetric"), true))
+                .isEqualTo("MixedCaseMetric");
+    }
+
+    @Test
+    public void testGetTableWithoutValidationDoesNotFetchMetadata()
+    {
+        VictoriaMetricsClient client = new VictoriaMetricsClient(
+                new VictoriaMetricsConnectorConfig()
+                        .setUri(java.net.URI.create("http://127.0.0.1:1"))
+                        .setTenantId("multitenant")
+                        .setTableNameValidationEnabled(false)
+                        .setCaseInsensitiveNameMatching(false),
+                METRIC_CODEC,
+                TYPE_MANAGER);
+
+        assertThat(client.getTable("default", "MixedCaseMetric"))
+                .extracting(VictoriaMetricsTable::name)
+                .isEqualTo("MixedCaseMetric");
     }
 }

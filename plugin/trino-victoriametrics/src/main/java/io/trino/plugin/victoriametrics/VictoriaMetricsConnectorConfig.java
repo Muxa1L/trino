@@ -47,6 +47,7 @@ public class VictoriaMetricsConnectorConfig
     private File bearerTokenFile;
     private String user;
     private String password;
+    private boolean tableNameValidationEnabled = true;
     private boolean caseInsensitiveNameMatching;
     private Map<String, String> additionalHeaders = ImmutableMap.of();
 
@@ -213,6 +214,19 @@ public class VictoriaMetricsConnectorConfig
     public boolean isCaseInsensitiveNameMatching()
     {
         return caseInsensitiveNameMatching;
+    }
+
+    public boolean isTableNameValidationEnabled()
+    {
+        return tableNameValidationEnabled;
+    }
+
+    @Config("victoriametrics.table-name-validation-enabled")
+    @ConfigDescription("Whether to validate metric names through metadata fetch during planning; disable to speed up direct table queries on very large clusters")
+    public VictoriaMetricsConnectorConfig setTableNameValidationEnabled(boolean tableNameValidationEnabled)
+    {
+        this.tableNameValidationEnabled = tableNameValidationEnabled;
+        return this;
     }
 
     @Config("victoriametrics.case-insensitive-name-matching")
