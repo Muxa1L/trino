@@ -30,6 +30,7 @@ victoriametrics.max.query.range.duration=21d
 victoriametrics.cache.ttl=30s
 victoriametrics.export.reduce-mem-usage-enabled=false
 victoriametrics.table-name-validation-enabled=false
+victoriametrics.case-insensitive-name-matching=false
 victoriametrics.read-timeout=10s
 victoriametrics.auth.user=metrics
 victoriametrics.auth.password=secret
@@ -39,6 +40,8 @@ victoriametrics.http.additional-headers=X-Scope-OrgID:team-a
 On very large clusters, planning latency is usually dominated by metric-name enumeration through `/api/v1/label/__name__/values`. The connector currently uses that metadata path for `SHOW TABLES`, `information_schema`, and table-name validation during planning.
 
 If your queries reference known metrics directly, set `victoriametrics.table-name-validation-enabled=false` and increase `victoriametrics.cache.ttl` aggressively, for example to minutes or hours. That removes the metadata fetch from direct table queries such as `SELECT * FROM victoriametrics.default.http_requests_total ...`, but `SHOW TABLES` and `information_schema` will still enumerate metric names and remain expensive.
+
+If metric names in VictoriaMetrics are not queried with consistent casing, set `victoriametrics.case-insensitive-name-matching=true` to resolve table names without exact case matches. This requires metadata lookup to map the requested name back to the remote metric name, so it offsets the planning fast path from `victoriametrics.table-name-validation-enabled=false`.
 
 `victoriametrics.query.mode` supports:
 
