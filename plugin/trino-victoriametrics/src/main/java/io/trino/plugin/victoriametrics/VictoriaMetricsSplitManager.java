@@ -48,6 +48,7 @@ import static io.trino.plugin.victoriametrics.VictoriaMetricsClient.TIMESTAMP_CO
 import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.getMaxQueryRange;
 import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.getQueryChunkSize;
 import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.getQueryMode;
+import static io.trino.plugin.victoriametrics.VictoriaMetricsSessionProperties.isExportReduceMemUsageEnabled;
 import static io.trino.spi.type.DateTimeEncoding.unpackMillisUtc;
 import static java.time.Instant.ofEpochMilli;
 import static java.util.Objects.requireNonNull;
@@ -92,6 +93,7 @@ public class VictoriaMetricsSplitManager
         Duration maxQueryRangeDuration = getMaxQueryRange(session);
         Duration queryChunkSizeDuration = getQueryChunkSize(session);
         VictoriaMetricsQueryMode queryMode = getQueryMode(session);
+        boolean exportReduceMemUsageEnabled = isExportReduceMemUsageEnabled(session);
 
         List<ConnectorSplit> splits = switch (queryMode) {
             case QUERY -> generateTimesForSplits(victoriaMetricsClock.now(), maxQueryRangeDuration, queryChunkSizeDuration, tableHandle).stream()
@@ -107,7 +109,8 @@ public class VictoriaMetricsSplitManager
                     victoriaMetricsURI,
                     range,
                     table.name(),
-                    tableHandle.labelMatchers()).toString(), queryMode))
+                    tableHandle.labelMatchers(),
+                    exportReduceMemUsageEnabled).toString(), queryMode))
                 .collect(Collectors.toList());
         };
         return new FixedSplitSource(splits);
@@ -123,14 +126,17 @@ public class VictoriaMetricsSplitManager
                 .build();
     }
 
-    static URI buildExportQuery(URI baseURI, TimeRange range, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers)
+    static URI buildExportQuery(URI baseURI, TimeRange range, String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, boolean reduceMemUsageEnabled)
     {
-        return HttpUriBuilder.uriBuilderFrom(baseURI)
+        HttpUriBuilder builder = HttpUriBuilder.uriBuilderFrom(baseURI)
                 .appendPath("api/v1/export")
                 .addParameter("match[]", renderMatchExpression(metricName, labelMatchers))
                 .addParameter("start", decimalSecondString(range.startTimeMillis()))
-                .addParameter("end", decimalSecondString(range.endTimeMillis()))
-                .build();
+                .addParameter("end", decimalSecondString(range.endTimeMillis()));
+        if (reduceMemUsageEnabled) {
+            builder.addParameter("reduce_mem_usage", "1");
+        }
+        return builder.build();
     }
 
     static String renderQuery(String metricName, Map<String, VictoriaMetricsLabelMatcher> labelMatchers, Duration queryChunkSizeDuration)

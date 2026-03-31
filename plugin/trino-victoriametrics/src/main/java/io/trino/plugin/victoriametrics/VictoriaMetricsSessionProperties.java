@@ -23,6 +23,7 @@ import io.trino.spi.session.PropertyMetadata;
 import java.util.List;
 
 import static io.trino.plugin.base.session.PropertyMetadataUtil.durationProperty;
+import static io.trino.spi.session.PropertyMetadata.booleanProperty;
 import static io.trino.spi.session.PropertyMetadata.enumProperty;
 
 public final class VictoriaMetricsSessionProperties
@@ -31,6 +32,7 @@ public final class VictoriaMetricsSessionProperties
     private static final String QUERY_CHUNK_SIZE_DURATION = "query_chunk_size_duration";
     private static final String MAX_QUERY_RANGE_DURATION = "max_query_range_duration";
     private static final String QUERY_MODE = "query_mode";
+    private static final String EXPORT_REDUCE_MEM_USAGE_ENABLED = "export_reduce_mem_usage_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -54,6 +56,11 @@ public final class VictoriaMetricsSessionProperties
                     VictoriaMetricsQueryMode.class,
                     connectorConfig.getQueryMode(),
                     false))
+                .add(booleanProperty(
+                        EXPORT_REDUCE_MEM_USAGE_ENABLED,
+                        "Whether EXPORT mode should add reduce_mem_usage=1 to the VictoriaMetrics request",
+                        connectorConfig.isExportReduceMemUsageEnabled(),
+                        false))
                 .build();
     }
 
@@ -76,5 +83,10 @@ public final class VictoriaMetricsSessionProperties
     public static VictoriaMetricsQueryMode getQueryMode(ConnectorSession session)
     {
         return session.getProperty(QUERY_MODE, VictoriaMetricsQueryMode.class);
+    }
+
+    public static boolean isExportReduceMemUsageEnabled(ConnectorSession session)
+    {
+        return session.getProperty(EXPORT_REDUCE_MEM_USAGE_ENABLED, Boolean.class);
     }
 }

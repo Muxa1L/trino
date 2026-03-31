@@ -43,6 +43,7 @@ public class VictoriaMetricsConnectorConfig
     private Duration maxQueryRangeDuration = new Duration(21, TimeUnit.DAYS);
     private Duration cacheDuration = new Duration(30, TimeUnit.SECONDS);
     private Duration readTimeout = new Duration(10, TimeUnit.SECONDS);
+    private boolean exportReduceMemUsageEnabled;
     private String httpAuthHeaderName = HttpHeaders.AUTHORIZATION;
     private File bearerTokenFile;
     private String user;
@@ -141,6 +142,19 @@ public class VictoriaMetricsConnectorConfig
     public VictoriaMetricsConnectorConfig setCacheDuration(Duration cacheDuration)
     {
         this.cacheDuration = cacheDuration;
+        return this;
+    }
+
+    public boolean isExportReduceMemUsageEnabled()
+    {
+        return exportReduceMemUsageEnabled;
+    }
+
+    @Config("victoriametrics.export.reduce-mem-usage-enabled")
+    @ConfigDescription("Whether EXPORT mode should add reduce_mem_usage=1 to the VictoriaMetrics request")
+    public VictoriaMetricsConnectorConfig setExportReduceMemUsageEnabled(boolean exportReduceMemUsageEnabled)
+    {
+        this.exportReduceMemUsageEnabled = exportReduceMemUsageEnabled;
         return this;
     }
 

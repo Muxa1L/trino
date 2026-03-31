@@ -43,6 +43,7 @@ public class TestVictoriaMetricsConnectorConfig
                 .setQueryChunkSizeDuration(new Duration(1, DAYS))
                 .setMaxQueryRangeDuration(new Duration(21, DAYS))
                 .setCacheDuration(new Duration(30, SECONDS))
+                .setExportReduceMemUsageEnabled(false)
                 .setBearerTokenFile(null)
                 .setHttpAuthHeaderName(HttpHeaders.AUTHORIZATION)
                 .setUser(null)
@@ -63,6 +64,7 @@ public class TestVictoriaMetricsConnectorConfig
                 .put("victoriametrics.query.chunk.size.duration", "365d")
                 .put("victoriametrics.max.query.range.duration", "1095d")
                 .put("victoriametrics.cache.ttl", "60s")
+                .put("victoriametrics.export.reduce-mem-usage-enabled", "true")
                 .put("victoriametrics.auth.http.header.name", "X-team-auth")
                 .put("victoriametrics.bearer.token.file", "/tmp/bearer_token.txt")
                 .put("victoriametrics.read-timeout", "30s")
@@ -80,6 +82,7 @@ public class TestVictoriaMetricsConnectorConfig
         assertThat(config.getQueryChunkSizeDuration()).isEqualTo(new Duration(365, DAYS));
         assertThat(config.getMaxQueryRangeDuration()).isEqualTo(new Duration(1095, DAYS));
         assertThat(config.getCacheDuration()).isEqualTo(new Duration(60, SECONDS));
+        assertThat(config.isExportReduceMemUsageEnabled()).isTrue();
         assertThat(config.getHttpAuthHeaderName()).isEqualTo("X-team-auth");
         assertThat(config.getBearerTokenFile()).contains(new File("/tmp/bearer_token.txt"));
         assertThat(config.getUser()).isEmpty();

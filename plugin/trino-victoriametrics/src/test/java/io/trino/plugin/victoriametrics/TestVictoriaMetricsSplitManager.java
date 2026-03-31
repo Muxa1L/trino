@@ -46,9 +46,23 @@ public class TestVictoriaMetricsSplitManager
                 URI.create("http://vmselect:8481/select/multitenant/prometheus"),
                 new VictoriaMetricsSplitManager.TimeRange(1_549_891_472_010L, 1_549_891_487_724L),
                 "up",
-                Map.of("job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus")));
+                Map.of("job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus")),
+                false);
 
         assertThat(uri).hasToString("http://vmselect:8481/select/multitenant/prometheus/api/v1/export?match%5B%5D=up%7Bjob%3D%22prometheus%22%7D&start=1549891472.01&end=1549891487.724");
+    }
+
+    @Test
+    public void testBuildExportQueryWithReduceMemUsage()
+    {
+        URI uri = VictoriaMetricsSplitManager.buildExportQuery(
+                URI.create("http://vmselect:8481/select/multitenant/prometheus"),
+                new VictoriaMetricsSplitManager.TimeRange(1_549_891_472_010L, 1_549_891_487_724L),
+                "up",
+                Map.of("job", new VictoriaMetricsLabelMatcher(VictoriaMetricsLabelMatcher.MatchType.EQUAL, "prometheus")),
+                true);
+
+        assertThat(uri).hasToString("http://vmselect:8481/select/multitenant/prometheus/api/v1/export?match%5B%5D=up%7Bjob%3D%22prometheus%22%7D&start=1549891472.01&end=1549891487.724&reduce_mem_usage=1");
     }
 
     @Test

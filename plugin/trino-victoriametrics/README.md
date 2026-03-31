@@ -28,6 +28,7 @@ victoriametrics.query.mode=QUERY
 victoriametrics.query.chunk.size.duration=1d
 victoriametrics.max.query.range.duration=21d
 victoriametrics.cache.ttl=30s
+victoriametrics.export.reduce-mem-usage-enabled=false
 victoriametrics.table-name-validation-enabled=false
 victoriametrics.read-timeout=10s
 victoriametrics.auth.user=metrics
@@ -44,7 +45,9 @@ If your queries reference known metrics directly, set `victoriametrics.table-nam
 - `QUERY` for the existing `/api/v1/query` path using rollup queries.
 - `EXPORT` for `/api/v1/export`, which reads raw samples with explicit `start` and `end` ranges.
 
-The same option is also exposed as the `query_mode` catalog session property when you need to switch modes per query.
+When `victoriametrics.query.mode=EXPORT`, you can set `victoriametrics.export.reduce-mem-usage-enabled=true` to add `reduce_mem_usage=1` to export requests. The same option is available as the `export_reduce_mem_usage_enabled` catalog session property.
+
+The query mode itself is also exposed as the `query_mode` catalog session property when you need to switch modes per query.
 
 ## Multitenant reads
 
